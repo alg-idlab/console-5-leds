@@ -50,7 +50,7 @@ En résumé pour publier une version :
 4. Créer une **Release** GitHub avec ces deux fichiers en pièces jointes.
 5. Sur la console : *Système → MAJ*.
 
-## Organisation du dépôt (suggestion)
+## Organisation du dépôt
 
 ```
 console-5-leds/
