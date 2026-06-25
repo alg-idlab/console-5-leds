@@ -37,7 +37,7 @@ Les boutons sont en `INPUT_PULLUP` (l'autre patte au GND). On évite GPIO2/8/9 (
 1. **Carte** : installer « esp32 » (Espressif) dans le gestionnaire de cartes ; choisir *ESP32C3 Dev Module*.
 2. **Bibliothèques** : U8g2 (olikraus), FastLED (≥ 3.6), WiFiManager (tzapu).
 3. **Options carte** : *USB CDC On Boot: Enabled*, et **Partition Scheme : Minimal SPIFFS (1.9MB APP with OTA)** — indispensable pour l'OTA.
-4. Ouvrir `AmauryConsole_C3/AmauryConsole_C3.ino`, cliquer **Vérifier**, puis **Téléverser** en USB.
+4. Ouvrir `Console_ESP32-C3/Console_ESP32-C3.ino`, cliquer **Vérifier**, puis **Téléverser** en USB.
    - Si l'upload ne part pas : maintenir **BOOT**, appuyer **RST**, relâcher BOOT ; régler *Upload Speed* sur **115200**.
 5. La console démarre (écran « IDLAB CONSOLE » + numéro de version). Configurer ensuite le WiFi (menu Système → WiFi) pour activer les futures mises à jour OTA.
 
