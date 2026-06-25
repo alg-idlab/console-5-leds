@@ -71,8 +71,8 @@ console-5-leds/
 ├── REGLES.md            ← règles des jeux
 ├── GUIDE_WIFI_OTA.md    ← guide WiFi + mises à jour
 ├── version.txt          ← version courante (aussi jointe aux Releases)
-└── AmauryConsole_C3/
-    └── AmauryConsole_C3.ino   ← code source
+└── Console_ESP32-C3/
+    └──Console_ESP32-C3.ino   ← code source
 ```
 - Les fichiers `.md` et le code vont **dans le dépôt** (onglet Code).
 - Le **`firmware.bin`** compilé et **`version.txt`** se mettent en **pièces jointes des Releases** (onglet Releases), c'est ce que la console télécharge.
@@ -81,4 +81,4 @@ console-5-leds/
 
 Le numéro de version est dans `FW_VERSION` (et affiché au démarrage). GitHub conserve automatiquement tout l'historique (commits + Releases) : pas besoin de dupliquer les fichiers pour garder les anciennes versions.
 
-Version actuelle : **2.1.2**.
+Version actuelle : **2.1.3**.
