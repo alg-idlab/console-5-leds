@@ -58,8 +58,7 @@ console-5-leds/
 ├── REGLES.md            ← règles des jeux
 ├── GUIDE_WIFI_OTA.md    ← guide WiFi + mises à jour
 ├── version.txt          ← version courante (aussi jointe aux Releases)
-└── AmauryConsole_C3/
-    └── AmauryConsole_C3.ino   ← code source
+└── AmauryConsole_C3.ino ← code source
 ```
 - Les fichiers `.md` et le code vont **dans le dépôt** (onglet Code).
 - Le **`firmware.bin`** compilé et **`version.txt`** se mettent en **pièces jointes des Releases** (onglet Releases), c'est ce que la console télécharge.
