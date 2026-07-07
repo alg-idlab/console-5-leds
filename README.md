@@ -6,7 +6,7 @@ Projet du **FabLab IDLAB**.
 
 ## Jeux
 
-12 jeux : Simon, Réflexe, Réaction, Stop la lumière, Code (Mastermind), Jacques a dit, Duel 2 joueurs, Roulette, Stroop, Tape‑vite, Pierre‑Feuille‑Ciseaux, Séquence éclair.
+16 jeux : Simon, Réflexe, Réaction, Stop la lumière, Code (Mastermind), Jacques a dit, Duel 2 joueurs (avec mode Piège), Roulette à jetons, Stroop, Tape‑vite, Pierre‑Feuille‑Ciseaux (match en 5), Séquence éclair, Tir à la corde (2 joueurs), Chrono caché, Rythme, Mémoire inversée.
 👉 Règles détaillées dans **[REGLES.md](REGLES.md)**.
 
 ## Matériel et branchements (ESP32‑C3 0.42" OLED)
@@ -63,7 +63,7 @@ En résumé pour publier une nouvelle version :
 
 Garder le même numéro partout pour une version donnée : `FW_VERSION`, `version.txt` et le tag de la Release.
 
-## Organisation du dépôt
+## Organisation du dépôt (suggestion)
 
 ```
 console-5-leds/
@@ -72,7 +72,7 @@ console-5-leds/
 ├── GUIDE_WIFI_OTA.md    ← guide WiFi + mises à jour
 ├── version.txt          ← version courante (aussi jointe aux Releases)
 └── Console_ESP32-C3/
-    └──Console_ESP32-C3.ino   ← code source
+    └── Console_ESP32-C3.ino   ← code source
 ```
 - Les fichiers `.md` et le code vont **dans le dépôt** (onglet Code).
 - Le **`firmware.bin`** compilé et **`version.txt`** se mettent en **pièces jointes des Releases** (onglet Releases), c'est ce que la console télécharge.
@@ -81,4 +81,4 @@ console-5-leds/
 
 Le numéro de version est dans `FW_VERSION` (et affiché au démarrage). GitHub conserve automatiquement tout l'historique (commits + Releases) : pas besoin de dupliquer les fichiers pour garder les anciennes versions.
 
-Version actuelle : **2.1.3**.
+Version actuelle : **2.2.0**.
