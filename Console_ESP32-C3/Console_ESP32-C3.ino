@@ -41,7 +41,7 @@
    Remplace USER/REPO par ton depot GitHub (ex: alg-idlab/console-5-leds).
    Les URL "latest/download" pointent toujours vers la derniere release.
    ===================================================================== */
-#define FW_VERSION   "2.1.2"
+#define FW_VERSION   "2.2.0"
 const char* VERSION_URL  = "https://github.com/alg-idlab/console-5-leds/releases/latest/download/version.txt";
 const char* FIRMWARE_URL = "https://github.com/alg-idlab/console-5-leds/releases/latest/download/firmware.bin";
 const char* AP_NAME      = "IDLAB-Setup";   // hotspot de configuration WiFi
@@ -111,6 +111,7 @@ unsigned long btnChangeT[NB_BTN];
 bool          btnFront[NB_BTN];
 
 void serviceBuzzer();   // prototype (defini plus bas)
+void beep(int freq, int dur);
 
 void majBoutons() {
   serviceBuzzer();        // coupe le buzzer quand sa duree est ecoulee
@@ -322,7 +323,13 @@ void wifiConfigPortal() {
 }
 
 // Oublie le reseau enregistre (pour en mettre un autre ensuite).
+// Demande confirmation : VERT = oui, tout autre bouton = annuler.
 void wifiReset() {
+  hud2("Effacer WiFi?", "Vert=OUI");
+  fill_solid(leds, NUM_LEDS, CRGB(120, 0, 0)); FastLED.show();
+  int ev = attendreEvenement(8000);
+  effacer();
+  if (ev != 2) { hud2("WiFi", "Annule"); attendre(900); return; }
   hud2("WiFi", "Oubli...");
   wm.resetSettings();
   WiFi.disconnect(true, true);
@@ -426,7 +433,7 @@ void verifierMaj() {
 enum State { MENU, JEU };
 State state = MENU;
 
-const int NB_JEUX = 12;
+const int NB_JEUX = 16;
 const int NB_SYS  = 10;
 const int NB_ITEMS = NB_JEUX + NB_SYS;
 int  menuIndex = 0;       // jeu selectionne (menu principal)
@@ -436,7 +443,8 @@ bool sousMenuSys = false; // false = menu jeux, true = sous-menu systeme
 const char* NOMS[NB_JEUX] = {
   "Simon", "Reflexe", "Reaction", "Stop",
   "Code", "Jacques", "Duel", "Roulette",
-  "Stroop", "Tape vite", "PFC", "Eclair"
+  "Stroop", "Tape vite", "PFC", "Eclair",
+  "Corde 2J", "Chrono", "Rythme", "Inverse"
 };
 const char* NOMS_SYS[NB_SYS] = {
   "MAJ", "WiFi", "WiFi RAZ", "Lumiere", "Volume", "Contraste",
@@ -457,6 +465,10 @@ CRGB themeJeu(int i) {
     case 9: return CRGB(0, 200, 200);   // Tape vite
     case 10: return CRGB(150, 255, 0);  // PFC
     case 11: return CRGB(160, 0, 255);  // Eclair
+    case 12: return CRGB(255, 60, 0);   // Corde 2J
+    case 13: return CRGB(0, 100, 255);  // Chrono
+    case 14: return CRGB(255, 0, 200);  // Rythme
+    case 15: return CRGB(0, 255, 120);  // Inverse
   }
   return CRGB::White;
 }
@@ -484,17 +496,23 @@ const char* nomItem(int i) {
 void afficherMenu() {
   uint8_t puls = beatsin8(40, 120, 255);
   CRGB c; const char* nom; char buf[16];
+  int courant, total;
   if (sousMenuSys) {
     c = themeItem(NB_JEUX + sysIndex);
     nom = NOMS_SYS[sysIndex];
     snprintf(buf, sizeof(buf), "SYS %d/%d", sysIndex + 1, NB_SYS);
+    courant = sysIndex; total = NB_SYS;
   } else {
     c = themeItem(menuIndex);
     nom = NOMS[menuIndex];
     snprintf(buf, sizeof(buf), "JEU %d/%d", menuIndex + 1, NB_JEUX);
+    courant = menuIndex; total = NB_JEUX;
   }
   c.nscale8_video(puls);
   fill_solid(leds, NUM_LEDS, c);
+  // Indicateur de position : une LED blanche marque ou on est dans la liste.
+  int posLed = (total > 1) ? (courant * (NUM_LEDS - 1)) / (total - 1) : 0;
+  leds[posLed] = CRGB::White;
   FastLED.show();
 
   u8g2.clearBuffer();
@@ -507,9 +525,19 @@ void afficherMenu() {
 }
 
 /* Navigation du menu :
-   - appui COURT sur SELECT  -> passe au jeu (ou a l'entree systeme) suivant
+   - appui COURT sur SELECT  -> item suivant
+   - bouton JAUNE             -> item precedent
    - appui LONG sur SELECT    -> bascule entre menu JEUX et sous-menu SYSTEME
-   - bouton couleur           -> lance le jeu / l'entree selectionnee        */
+   - autre bouton couleur     -> lance le jeu / l'entree selectionnee        */
+void lancer(int index);
+void veille();
+
+// Bip normal en defilant, double bip grave quand la liste reboucle.
+void bipDefile(bool reboucle) {
+  if (reboucle) { son(300, 50); beep(240, 80); }
+  else          { beep(350, 60); }
+}
+
 void menuLoop() {
   // Veille ecran apres inactivite (anti burn-in)
   if (sleepMinutes > 0 && millis() - lastActivity > (unsigned long)sleepMinutes * 60000UL) {
@@ -519,9 +547,20 @@ void menuLoop() {
   afficherMenu();
   majBoutons();
 
-  // Lancement par un bouton couleur
-  for (int i = 0; i <= 4; i++) {
-    if (prendreAppui(i)) {
+  // JAUNE = item precedent
+  if (prendreAppui(3)) {
+    lastActivity = millis();
+    bool reboucle;
+    if (sousMenuSys) { reboucle = (sysIndex == 0);  sysIndex  = (sysIndex + NB_SYS - 1) % NB_SYS; }
+    else             { reboucle = (menuIndex == 0); menuIndex = (menuIndex + NB_JEUX - 1) % NB_JEUX; }
+    bipDefile(reboucle);
+    return;
+  }
+
+  // Lancement par un bouton couleur (sauf JAUNE, reserve a la navigation)
+  const int lanceurs[4] = { 0, 1, 2, 4 };
+  for (int k = 0; k < 4; k++) {
+    if (prendreAppui(lanceurs[k])) {
       lastActivity = millis();
       melodieDepart();
       lancer(sousMenuSys ? (NB_JEUX + sysIndex) : menuIndex);
@@ -543,9 +582,8 @@ void menuLoop() {
   } else {
     if (selDown != 0 && !selLong) {    // relache avant 700 ms = appui court
       lastActivity = millis();
-      beep(350, 60);
-      if (sousMenuSys) sysIndex  = (sysIndex + 1) % NB_SYS;
-      else             menuIndex = (menuIndex + 1) % NB_JEUX;
+      if (sousMenuSys) { sysIndex  = (sysIndex + 1) % NB_SYS;   bipDefile(sysIndex == 0); }
+      else             { menuIndex = (menuIndex + 1) % NB_JEUX; bipDefile(menuIndex == 0); }
     }
     selDown = 0;
     selLong = false;
@@ -734,10 +772,21 @@ void jeuJacquesADit() {
    ===================================================================== */
 void jeuDuel() {
   const int J1 = 0; const int J2 = 1; int score1 = 0, score2 = 0;
-  viderAppuis(); attendre(500);
+  viderAppuis();
+  // Choix du mode : Bleu = classique, Rouge = piege (fausses couleurs !)
+  hud2("Bleu=Normal", "Rouge=Piege");
+  bool piege = false;
+  while (true) {
+    int ev = attendreEvenement(0);
+    if (ev == EV_SELECT) return;
+    if (ev == J1) { piege = false; break; }
+    if (ev == J2) { piege = true;  break; }
+  }
+  hud2("Duel", piege ? "PIEGE!" : "Normal");
+  attendre(700);
   while (true) {
     char b[16]; snprintf(b, sizeof(b), "%d  -  %d", score1, score2);
-    hud2("Duel J1/J2", b);
+    hud2(score1 == 2 && score2 == 2 ? "MORT SUBITE" : "Duel J1/J2", b);
     fill_solid(leds, NUM_LEDS, CRGB::Red); FastLED.show();
     unsigned long attente = random(1500, 4500);
     unsigned long debut = millis(); int gagnant = -1; bool fauxDepart = false;
@@ -746,6 +795,30 @@ void jeuDuel() {
       if (ev == EV_SELECT) return;
       if (ev == J1) { gagnant = J2; fauxDepart = true; break; }
       if (ev == J2) { gagnant = J1; fauxDepart = true; break; }
+    }
+    // Mode piege : parfois une FAUSSE couleur s'allume avant le vert.
+    // Celui qui tombe dans le panneau donne le point a l'autre !
+    if (!fauxDepart && piege && random(0, 100) < 45) {
+      CRGB leurres[3] = { CRGB::Yellow, CRGB::Magenta, CRGB::Cyan };
+      fill_solid(leds, NUM_LEDS, leurres[random(0, 3)]); FastLED.show();
+      beep(300, 60);
+      unsigned long tLeurre = millis();
+      while (millis() - tLeurre < 700) {
+        int ev = lireEvenement();
+        if (ev == EV_SELECT) return;
+        if (ev == J1) { gagnant = J2; fauxDepart = true; break; }
+        if (ev == J2) { gagnant = J1; fauxDepart = true; break; }
+      }
+      if (!fauxDepart) {
+        fill_solid(leds, NUM_LEDS, CRGB::Red); FastLED.show();
+        unsigned long tRouge = millis(); unsigned long dRouge = random(400, 1200);
+        while (millis() - tRouge < dRouge) {
+          int ev = lireEvenement();
+          if (ev == EV_SELECT) return;
+          if (ev == J1) { gagnant = J2; fauxDepart = true; break; }
+          if (ev == J2) { gagnant = J1; fauxDepart = true; break; }
+        }
+      }
     }
     if (!fauxDepart) {
       fill_solid(leds, NUM_LEDS, CRGB::Green); FastLED.show(); beep(880, 80);
@@ -774,21 +847,33 @@ void jeuDuel() {
 }
 
 /* =====================================================================
-   JEU 8 - ROULETTE (chance)
+   JEU 8 - ROULETTE (chance, avec JETONS)
+   Tu as une banque de jetons sauvegardee. Chaque tour coute 1 jeton ;
+   si ta couleur sort tu recois 5 jetons. Banque vide -> on te reprete 5.
+   Record sauvegarde = la plus grosse fortune atteinte.
    ===================================================================== */
 void jeuRoulette() {
   viderAppuis();
+  int bank = prefs.getInt("bank", 5);
+  if (bank <= 0) {
+    bank = 5;
+    hud2("Ruine!", "On te prete 5");
+    son(220, 200); son(180, 300);
+    attendre(1500);
+  }
   while (true) {
-    hud2("Roulette", "Ta couleur?");
+    char t[16]; snprintf(t, sizeof(t), "Jetons %d", bank);
+    hud2(t, "Ta couleur?");
     int pari = -1; int pos = 0;
     while (pari == -1) {
       FastLED.clear();
       leds[pos % NUM_LEDS] = couleurDe(pos % 5);
       FastLED.show(); pos++;
       int ev = attendreEvenement(90);
-      if (ev == EV_SELECT) return;
+      if (ev == EV_SELECT) { prefs.putInt("bank", bank); return; }
       if (estCouleur(ev)) pari = ev;
     }
+    bank--;                                   // la mise part
     char b[16]; snprintf(b, sizeof(b), "Mise %s", couleurNom(pari));
     hud2("Roulette", b);
     flashTout(couleurDe(pari), notesCouleur[pari], 350); attendre(300);
@@ -801,14 +886,26 @@ void jeuRoulette() {
       if (s > tours - 8) delai += 35;
     }
     fill_solid(leds, NUM_LEDS, couleurDe(resultat)); FastLED.show();
-    char r[16]; snprintf(r, sizeof(r), "%s", couleurNom(resultat));
+    char r[16];
     if (resultat == pari) {
+      bank += 5;                              // gain : 5 jetons
+      snprintf(r, sizeof(r), "%s +5!", couleurNom(resultat));
       hud2("Gagne!", r); melodieVictoire();
-      for (int k = 0; k < 3; k++) { flashTout(couleurDe(resultat), 0, 200); attendre(120); }
+      for (int k = 0; k < 3; k++) { flashTout(CRGB::Gold, 0, 200); attendre(120); }
     } else {
+      snprintf(r, sizeof(r), "%s -1", couleurNom(resultat));
       hud2("Perdu", r); melodieDefaite();
     }
+    prefs.putInt("bank", bank);
+    // Record de fortune (meilleur score du jeu Roulette = index 7)
+    if (bank > prefs.getInt("hs7", 0)) prefs.putInt("hs7", bank);
     attendre(900); effacer(); attendre(300);
+    if (bank <= 0) {
+      hud2("Ruine!", "On te prete 5");
+      son(220, 200); son(180, 300);
+      bank = 5; prefs.putInt("bank", bank);
+      attendre(1500);
+    }
   }
 }
 
@@ -989,17 +1086,28 @@ void jeuTapeVite() {
     char b[4]; snprintf(b, sizeof(b), "%d", i);
     hud2("Pret ?", b); beep(440, 120); attendre(700);
   }
-  hud2("Tape vite!", "GO!"); beep(880, 120);
-  fill_solid(leds, NUM_LEDS, CRGB::Green); FastLED.show();
-  int coups = 0;
+  hud2("Alterne!", "GO!"); beep(880, 120);
+  // Regle anti-martelage : il faut ALTERNER les boutons, appuyer deux
+  // fois de suite sur le meme ne compte pas (bip grave). Les LEDs se
+  // remplissent comme une jauge (1 LED = 8 appuis).
+  int coups = 0; int dernier = -1;
   unsigned long debut = millis();
   while (millis() - debut < 5000) {
     int ev = lireEvenement();
     if (ev == EV_SELECT) { effacer(); return; }
     if (estCouleur(ev)) {
-      coups++;
-      char b[8]; snprintf(b, sizeof(b), "%d", coups);
-      hud2("Tape!", b);
+      if (ev == dernier) {
+        beep(160, 60);                 // meme bouton : ne compte pas !
+      } else {
+        dernier = ev; coups++;
+        char b[8]; snprintf(b, sizeof(b), "%d", coups);
+        hud2("Alterne!", b);
+        FastLED.clear();
+        int pleines = coups / 8;
+        for (int i = 0; i < pleines && i < NUM_LEDS; i++) leds[i] = CRGB::Green;
+        if (pleines < NUM_LEDS) leds[pleines] = CRGB(0, 60, 0);
+        FastLED.show();
+      }
     }
   }
   effacer();
@@ -1008,20 +1116,32 @@ void jeuTapeVite() {
 }
 
 /* =====================================================================
-   JEU - PIERRE FEUILLE CISEAUX contre la console
+   JEU - PIERRE FEUILLE CISEAUX contre la console (match en 5 points)
    Bleu = Pierre, Rouge = Feuille, Vert = Ciseaux. SELECT pour quitter.
+   Premier a 5 points (les egalites ne comptent pas). LEDs : tes points
+   en bleu depuis la gauche, ceux de la console en rouge depuis la
+   droite. 3 manches gagnees d'affilee = jingle bonus !
    ===================================================================== */
 void jeuPFC() {
-  const char* noms[3] = { "Pierre", "Feuille", "Ciseaux" };
   viderAppuis();
+  int ptsJoueur = 0, ptsConsole = 0, serie = 0;
+  const int CIBLE = 5;
   while (true) {
-    hud2("Pierre/Feu/Cis", "Bleu Rouge Vert");
+    // LEDs : score en cours
+    FastLED.clear();
+    for (int i = 0; i < ptsJoueur  && i < NUM_LEDS; i++) leds[i] = CRGB::Blue;
+    for (int i = 0; i < ptsConsole && i < NUM_LEDS; i++) leds[NUM_LEDS - 1 - i] += CRGB(120, 0, 0);
+    FastLED.show();
+    char s[16]; snprintf(s, sizeof(s), "%d - %d", ptsJoueur, ptsConsole);
+    hud2(s, "Bleu Rouge Vert");
     int joueur = -1;
     while (joueur == -1) {
       int ev = attendreEvenement(0);
       if (ev == EV_SELECT) return;
       if (ev >= 0 && ev <= 2) joueur = ev;
     }
+    // Suspense : 3 pulsations avant de reveler
+    for (int k = 0; k < 3; k++) { beep(400 + k * 100, 60); attendre(180); }
     int console = random(0, 3);
     int res;  // 0 nul, 1 gagne, 2 perd
     if (joueur == console) res = 0;
@@ -1029,10 +1149,24 @@ void jeuPFC() {
     else res = 2;
     char l[16]; snprintf(l, sizeof(l), "%c vs %c", "PFC"[joueur], "PFC"[console]);
     hud2(res == 0 ? "Egalite" : (res == 1 ? "Gagne!" : "Perdu"), l);
-    if (res == 1) { melodieVictoire(); flashTout(CRGB::Green, 0, 300); }
-    else if (res == 2) { melodieDefaite(); flashTout(CRGB::Red, 0, 300); }
-    else { beep(500, 150); }
-    attendre(1300);
+    if (res == 1) {
+      ptsJoueur++; serie++;
+      flashTout(CRGB::Green, 880, 250);
+      if (serie == 3) { hud2("SERIE x3!", l); melodieVictoire(); flashTout(CRGB::Gold, 0, 300); }
+    } else if (res == 2) {
+      ptsConsole++; serie = 0;
+      melodieDefaite(); flashTout(CRGB::Red, 0, 300);
+    } else {
+      beep(500, 150);
+    }
+    attendre(1100);
+    if (ptsJoueur >= CIBLE || ptsConsole >= CIBLE) {
+      hud2(ptsJoueur >= CIBLE ? "MATCH GAGNE!" : "Match perdu", s);
+      if (ptsJoueur >= CIBLE) melodieVictoire(); else melodieDefaite();
+      for (int k = 0; k < 3; k++) { flashTout(ptsJoueur >= CIBLE ? CRGB::Green : CRGB::Red, 0, 220); attendre(120); }
+      afficherScore(ptsJoueur);
+      return;
+    }
   }
 }
 
@@ -1068,6 +1202,179 @@ void jeuSequenceEclair() {
 }
 
 /* =====================================================================
+   JEU - TIR A LA CORDE (2 joueurs)
+   J1 martele BLEU, J2 martele ROUGE : chaque appui tire la lumiere vers
+   son camp. Le premier qui amene la lumiere tout au bout gagne.
+   ===================================================================== */
+void jeuCorde() {
+  const int J1 = 0; const int J2 = 1;
+  const int WIN = 12;                  // nb d'appuis d'avance pour gagner
+  viderAppuis();
+  while (true) {
+    hud2("Corde 2J", "Bleu vs Rouge");
+    attendre(1000);
+    for (int i = 3; i >= 1; i--) {
+      char b[4]; snprintf(b, sizeof(b), "%d", i);
+      hud2("Pret ?", b); beep(440, 120); attendre(700);
+    }
+    hud2("TIREZ!", "GO!"); beep(880, 150);
+    int pos = 0;                       // -WIN = victoire J1, +WIN = J2
+    int affiche = 999;
+    while (pos > -WIN && pos < WIN) {
+      int ev = lireEvenement();
+      if (ev == EV_SELECT) { effacer(); return; }
+      if (ev == J1) pos--;
+      if (ev == J2) pos++;
+      int marque = map(pos, -WIN, WIN, 0, NUM_LEDS - 1);
+      if (marque != affiche) {
+        affiche = marque;
+        FastLED.clear();
+        for (int i = 0; i < NUM_LEDS; i++) leds[i] = (i < marque) ? CRGB(0, 0, 60) : CRGB(60, 0, 0);
+        leds[marque] = CRGB::White;
+        FastLED.show();
+        beep(400 + marque * 100, 20);
+      }
+    }
+    bool j1Gagne = (pos <= -WIN);
+    hud2("Corde", j1Gagne ? "BLEU gagne!" : "ROUGE gagne!");
+    melodieVictoire();
+    for (int k = 0; k < 4; k++) { flashTout(j1Gagne ? CRGB::Blue : CRGB::Red, 0, 200); attendre(120); }
+    hud2("Revanche?", "Couleur=oui");
+    int ev = attendreEvenement(6000);
+    if (ev == EV_SELECT || ev == EV_RIEN) { effacer(); return; }
+    viderAppuis();
+  }
+}
+
+/* =====================================================================
+   JEU - CHRONO CACHE
+   Appuie pile quand tu penses que 5 secondes se sont ecoulees, sans
+   aucun repere ! Score = precision (100 = parfait).
+   ===================================================================== */
+void jeuChrono() {
+  viderAppuis();
+  while (true) {
+    hud2("Chrono cache", "Vise 5 sec");
+    attendre(1200);
+    for (int i = 3; i >= 1; i--) {
+      char b[4]; snprintf(b, sizeof(b), "%d", i);
+      hud2("Pret ?", b); beep(440, 120); attendre(700);
+    }
+    hud2("Chrono", "...");
+    effacer();
+    beep(880, 200);                    // top depart, puis plus rien !
+    unsigned long t0 = millis();
+    int ev = attendreEvenement(10000);
+    long ecart = (long)(millis() - t0) - 5000;
+    if (ev == EV_SELECT) return;
+    if (ev == EV_RIEN) { hud2("Chrono", "Endormi?"); melodieDefaite(); attendre(1200); continue; }
+    char b[16];
+    snprintf(b, sizeof(b), "%s%ld ms", ecart >= 0 ? "+" : "", ecart);
+    hud2("Ecart", b);
+    long absE = ecart < 0 ? -ecart : ecart;
+    int score = (absE >= 2500) ? 0 : (int)(100 - absE / 25);
+    // LEDs : 5 = quasi parfait ... 1 = loin
+    int nb = (absE < 100) ? 5 : (absE < 250) ? 4 : (absE < 500) ? 3 : (absE < 1000) ? 2 : 1;
+    for (int i = 0; i < nb; i++) { leds[i] = CRGB::Cyan; FastLED.show(); beep(500 + i * 120, 80); attendre(120); }
+    attendre(1200);
+    afficherScore(score);
+    return;
+  }
+}
+
+/* =====================================================================
+   JEU - RYTHME
+   Ecoute 4 battements, puis continue a appuyer EN CADENCE (n'importe
+   quel bouton couleur). Tolerance limitee, et le tempo accelere !
+   ===================================================================== */
+void jeuRythme() {
+  viderAppuis();
+  int periode = dms(600);
+  int tol = dms(170);
+  int score = 0;
+  hud2("Rythme", "Ecoute...");
+  attendre(800);
+  // 4 battements d'ecoute
+  for (int i = 0; i < 4; i++) {
+    flashTout(CRGB::Magenta, 660, 80);
+    attendre(periode - 80);
+    majBoutons(); if (prendreAppui(IDX_SELECT)) return;
+  }
+  hud2("Rythme", "A toi!");
+  viderAppuis();
+  unsigned long prochain = millis() + periode;
+  while (true) {
+    // Attend un appui autour du battement "prochain"
+    bool ok = false; bool fini = false;
+    while (true) {
+      long delta = (long)(millis() - prochain);
+      // flash discret pile sur le temps (repere visuel)
+      if (delta >= 0 && delta < 30) { leds[CENTER] = CRGB(40, 0, 40); FastLED.show(); }
+      if (delta > 40) { leds[CENTER] = CRGB::Black; FastLED.show(); }
+      int ev = lireEvenement();
+      if (ev == EV_SELECT) return;
+      if (estCouleur(ev)) {
+        long e = delta < 0 ? -delta : delta;
+        if (e <= tol) { ok = true; }
+        else          { fini = true; }        // trop tot / trop tard
+        break;
+      }
+      if (delta > tol) { fini = true; break; } // battement rate
+    }
+    if (fini) break;
+    if (ok) {
+      score++;
+      flashTout(CRGB::Green, 784, 40);
+      char b[8]; snprintf(b, sizeof(b), "%d", score);
+      hud2("Rythme", b);
+      if (score % 8 == 0 && periode > 300) {   // ca accelere !
+        periode = periode * 85 / 100;
+        tol = tol * 9 / 10; if (tol < 90) tol = 90;
+        hud2("Rythme", "+ vite!");
+        beep(1047, 100);
+      }
+      prochain += periode;
+    }
+  }
+  melodieDefaite();
+  afficherScore(score);
+}
+
+/* =====================================================================
+   JEU - MEMOIRE INVERSEE
+   Comme Simon... mais il faut reproduire la sequence A L'ENVERS !
+   ===================================================================== */
+void jeuInverse() {
+  const int MAX = 30; int seq[MAX]; int longueur = 2;
+  viderAppuis();
+  hud2("Inverse", "A l'envers!");
+  attendre(1200);
+  while (true) {
+    for (int i = 0; i < longueur; i++) seq[i] = couleurAleatoire();
+    char b[16]; snprintf(b, sizeof(b), "Niveau %d", longueur - 1);
+    hud2("Inverse", b);
+    for (int i = 0; i < longueur; i++) {
+      leds[CENTER] = couleurDe(seq[i]); FastLED.show();
+      beep(notesCouleur[seq[i]], dms(350)); attendre(dms(380));
+      effacer(); attendre(120);
+      majBoutons(); if (prendreAppui(IDX_SELECT)) return;
+    }
+    hud2("Inverse", "<-- envers!");
+    for (int i = longueur - 1; i >= 0; i--) {
+      int ev = attendreEvenement(0);
+      if (ev == EV_SELECT) return;
+      leds[CENTER] = couleurDe(ev); FastLED.show();
+      beep(notesCouleur[ev], 120); attendre(150); effacer();
+      if (ev != seq[i]) { melodieDefaite(); afficherScore(longueur - 2); return; }
+    }
+    beep(700, 80);
+    longueur++;
+    if (longueur >= MAX) { melodieVictoire(); afficherScore(longueur - 2); return; }
+    attendre(500);
+  }
+}
+
+/* =====================================================================
    AIGUILLAGE (jeux + entrees systeme)
    ===================================================================== */
 void lancer(int index) {
@@ -1087,6 +1394,10 @@ void lancer(int index) {
       case 9:  jeuTapeVite();       break;
       case 10: jeuPFC();            break;
       case 11: jeuSequenceEclair(); break;
+      case 12: jeuCorde();          break;
+      case 13: jeuChrono();         break;
+      case 14: jeuRythme();         break;
+      case 15: jeuInverse();        break;
     }
   } else {
     switch (index - NB_JEUX) {
@@ -1118,7 +1429,7 @@ void setup() {
   u8g2.setContrast(255);
   u8g2.setBusClock(400000);
 
-  // Reglages persistants (luminosite + volume)
+  // Reglages persistants (luminosite + volume + contraste + veille + niveau)
   prefs.begin("idlab", false);
   ledBrightness  = prefs.getInt("bright",   BRIGHTNESS_DEFAUT);
   buzzerVolume   = prefs.getInt("vol",      VOLUME_DEFAUT);
@@ -1139,14 +1450,20 @@ void setup() {
   randomSeed(esp_random());
   effacer();
 
-  // Ecran d'accueil
+  // Ecran d'accueil + petite animation LED (balayage arc-en-ciel + arpege)
   u8g2.clearBuffer();
   cadre();
   texteCentre("IDLAB", 15, u8g2_font_7x13B_tr);
   texteCentre("CONSOLE", 28, u8g2_font_7x13B_tr);
   texteCentre("v" FW_VERSION, 38, u8g2_font_4x6_tr);
   u8g2.sendBuffer();
-  attendre(1000);
+  for (int i = 0; i < NUM_LEDS; i++) {
+    leds[i] = CHSV(i * 50, 255, 255); FastLED.show();
+    son(notesCouleur[i], 70);
+  }
+  attendre(300);
+  for (int i = 0; i < NUM_LEDS; i++) { leds[i] = CRGB::Black; FastLED.show(); attendre(40); }
+  attendre(300);
 
   // Reconnexion WiFi silencieuse (si un reseau a deja ete enregistre).
   hud2("WiFi", "...");
